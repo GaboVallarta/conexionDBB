@@ -1,0 +1,12 @@
+# Credenciales secretas (NUNCA subir a Git)
+.env
+*.env
+
+# Caché de Python
+__pycache__/
+*.py[cod]
+
+# Videos pesados y modelos descargables
+*.mp4
+*.avi
+*.pt
