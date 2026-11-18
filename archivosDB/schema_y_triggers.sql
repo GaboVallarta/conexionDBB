@@ -3,24 +3,41 @@
 -- Motor: PostgreSQL (Supabase)
 -- ============================================================================
 
--- 1. Función para sincronizar el estado en tiempo real de la unidad
-CREATE OR REPLACE FUNCTION public.actualizar_estado_camion()
-RETURNS TRIGGER AS $$
-BEGIN
-  UPDATE public.unidades
-  SET 
-    ultima_parada_id = NEW.parada_id,
-    pasajeros_actuales = NEW.pasajeros_totales
-  WHERE id = NEW.unidad_id;
+-- 1. Cerrar brecha de escalada de privilegios y limpiar duplicados en PERFILES
+drop policy if exists "Usuarios actualizan su propio perfil" on public.perfiles;
+drop policy if exists "Usuarios ven su propio perfil" on public.perfiles;
+
+-- 2. Permitir que el trigger actualice UNIDADES sin chocar con RLS
+create or replace function public.actualizar_estado_camion()
+returns trigger
+language plpgsql
+security definer set search_path = ''
+as $$
+begin
+  update public.unidades
+  set 
+    ultima_parada_id = new.parada_id,
+    pasajeros_actuales = new.pasajeros_totales
+  where id = new.unidad_id;
   
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+  return new;
+end;
+$$;
 
--- 2. Disparador ejecutado automáticamente tras cada inserción en registros_ocupacion
-DROP TRIGGER IF EXISTS trigger_actualizar_camion ON public.registros_ocupacion;
+-- 3. Permitir al admin gestionar UNIDADES (crear/editar/borrar camiones)
+drop policy if exists "Admins gestionan unidades" on public.unidades;
+create policy "Admins gestionan unidades"
+  on public.unidades for all
+  using ( public.es_admin() )
+  with check ( public.es_admin() );
 
-CREATE TRIGGER trigger_actualizar_camion
-AFTER INSERT ON public.registros_ocupacion
-FOR EACH ROW
-EXECUTE FUNCTION public.actualizar_estado_camion();
+-- 4. Permitir al hardware actualizar el estado vivo en REGISTROS_PARADA (upsert/update)
+drop policy if exists "Hardware actualiza estado de parada" on public.registros_parada;
+create policy "Hardware actualiza estado de parada"
+  on public.registros_parada for update
+  to authenticated
+  using ( true )
+  with check ( true );
+
+-- 5. Limpiar política SELECT duplicada en RUTAS
+drop policy if exists "Lectura publica de paradas" on public.rutas;
